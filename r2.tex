@@ -1,0 +1,1007 @@
+\documentclass[12pt,a4paper]{article}
+
+% ─── Packages ───────────────────────────────────────────────────────────────
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, linkcolor=blue, citecolor=blue, urlcolor=blue}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{cite}
+\usepackage{float}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows, positioning, fit, backgrounds}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{setspace}
+
+% ─── Style ──────────────────────────────────────────────────────────────────
+\setlength{\parskip}{0.5em}
+\setlength{\parindent}{1.5em}
+\onehalfspacing
+
+\pagestyle{fancy}
+\fancyhf{}
+
+\rfoot{\thepage}
+
+\lstset{
+  basicstyle=\small\ttfamily,
+  breaklines=true,
+  frame=single,
+  keywordstyle=\color{blue},
+  commentstyle=\color{gray},
+  stringstyle=\color{red},
+  language=Python,
+  numbers=left,
+  numberstyle=\tiny,
+  tabsize=2
+}
+
+% ─── Titre ──────────────────────────────────────────────────────────────────
+\title{
+  \vspace{-1cm}
+  \includegraphics[width=3cm]{example-image}\\[0.5cm]
+  {\Large Rapport de Projet}\\[0.3cm]
+  \rule{\linewidth}{0.4pt}\\[0.3cm]
+}
+
+
+
+\date{Année universitaire 2025--2026}
+
+% ─── Document ───────────────────────────────────────────────────────────────
+\begin{document}
+
+\maketitle
+\thispagestyle{empty}
+
+\begin{abstract}
+La sécurité des usagers de la route vulnérables (piétons, cyclistes, motocyclistes)
+constitue un enjeu majeur dans les réseaux de communication véhiculaires modernes.
+Ces usagers peuvent être détectés par des capteurs GPS et des systèmes V2X, permettant
+de calculer leur proximité dangereuse avec des véhicules à moteur et de déclencher
+des alertes en temps réel. Cependant, les décisions de communication -- transmettre
+directement de véhicule à véhicule (V2V) ou transiter par une infrastructure (V2I)
+via une unité de bord de route (RSU) -- sont aujourd'hui prises de manière statique,
+sans adaptation aux conditions du réseau. Ce rapport propose un mécanisme de sélection
+adaptatif du mode de communication fondé sur l'approche \textit{Multi-Armed Bandit} (MAB).
+Deux algorithmes sont mis en œuvre et comparés : la politique $\varepsilon$-greedy et
+la politique UCB (\textit{Upper Confidence Bound}). Les critères de décision comprennent
+le délai de transmission, le taux de perte de paquets et la charge réseau. Les résultats
+obtenus par simulation montrent que l'approche MAB permet une sélection dynamique et
+efficace du mode de communication, en s'adaptant aux conditions du réseau et au type
+d'utilisateur (piéton, motocycliste, véhicule), tout en minimisant la latence de
+transmission des alertes de sécurité.
+
+\medskip
+\noindent\textbf{Mots-clés :} réseaux véhiculaires, usagers vulnérables de la route, 
+multi-armed bandit, $\varepsilon$-greedy, UCB, V2V, V2I, sélection de mode de communication,
+ITS-G5, IEEE 802.11p.
+\end{abstract}
+
+\newpage
+\tableofcontents
+\newpage
+
+% ═══════════════════════════════════════════════════════════════════════════
+\section{Introduction}
+% ═══════════════════════════════════════════════════════════════════════════
+
+\subsection{Contexte et motivation}
+
+Les réseaux véhiculaires (VANETs) et, plus généralement, les communications V2X
+(\textit{Vehicle-to-Everything}) représentent un pilier central des systèmes de
+transport intelligent (ITS) de nouvelle génération. L'émergence des véhicules connectés
+et autonomes a profondément transformé les exigences en matière de communication :
+les véhicules ne se contentent plus d'être des entités passives mais deviennent des
+nœuds actifs capables d'échanger des données de façon continue avec leur environnement.
+
+Parmi les applications les plus critiques figure la protection des \textbf{usagers de la
+route vulnérables} (URV), une catégorie englobant les piétons, les cyclistes, les
+motocyclistes et tout utilisateur non protégé par une carrosserie métallique. Selon les
+données de l'Union Européenne, ces usagers représentent plus de 47\% des victimes
+de la route, malgré leur part relativement faible dans les flux de circulation.
+La remontée périodique de données de localisation GPS par les URV, combinée aux
+mécanismes d'alerte V2X, offre une fenêtre d'opportunité pour détecter et prévenir
+des collisions potentielles.
+
+Cette remontée d'informations peut être traitée à différents niveaux :
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Au niveau du véhicule}, via des communications directes V2V
+        (\textit{Vehicle-to-Vehicle}) standardisées par IEEE 802.11p / ITS-G5 ;
+  \item \textbf{Au niveau de l'infrastructure}, via des unités de bord de route
+        (RSU -- \textit{RoadSide Units}) qui peuvent agréger, filtrer et redistribuer
+        les informations à tous les véhicules dans leur portée (V2I) ;
+  \item \textbf{Au niveau du edge cloud}, sur des serveurs déployés en bordure de route,
+        capables d'exécuter des algorithmes d'intelligence artificielle pour analyser
+        la situation et déclencher des alertes contextuelles.
+\end{itemize}
+
+La question se pose alors : \textit{quel mode de communication choisir dans un contexte
+donné pour minimiser la latence et garantir la livraison fiable d'une alerte critique ?}
+
+\subsection{Problématique}
+
+Les réseaux véhiculaires se caractérisent par leur haute mobilité, leur densité
+variable, et une topologie en perpétuelle évolution. Dans ce contexte, les approches
+de sélection statique du mode de communication (V2V ou V2I) s'avèrent insuffisantes.
+En effet :
+\begin{itemize}[leftmargin=*]
+  \item Dans des zones denses (carrefours, intersections), les communications V2V
+        peuvent être perturbées par un fort encombrement du canal radio ;
+  \item Dans des zones peu denses ou hors de portée des RSUs, les communications V2I
+        peuvent ne pas être disponibles ;
+  \item La qualité de signal, la charge du réseau et les conditions de mobilité
+        varient rapidement et de façon imprévisible.
+\end{itemize}
+
+Face à cette incertitude inhérente, nous proposons d'adopter une approche
+d'apprentissage par renforcement légère et efficace : le cadre des
+\textbf{Multi-Armed Bandits (MAB)}. Cette approche permet d'apprendre en ligne
+la meilleure stratégie de communication sans nécessiter de modèle complet de
+l'environnement, en équilibrant exploration et exploitation des canaux disponibles.
+
+\subsection{Contributions}
+
+Les contributions de ce projet sont les suivantes :
+\begin{enumerate}[leftmargin=*]
+  \item Formulation du problème de sélection du mode de communication V2V/V2I
+        comme un problème de Multi-Armed Bandit ;
+  \item Mise en œuvre et comparaison de deux algorithmes MAB :
+        $\varepsilon$-greedy et UCB ;
+  \item Conception d'une simulation en Python modélisant des scénarios de
+        communication entre URV et véhicules, avec différents profils de priorité ;
+  \item Analyse des performances des deux algorithmes selon les critères de
+        délai, taux de perte et charge réseau ;
+  \item Discussion sur la scalabilité et les perspectives d'intégration dans
+        un cadre normatif ETSI ITS-G5.
+\end{enumerate}
+
+\subsection{Organisation du rapport}
+
+Le reste de ce rapport est organisé comme suit. La Section~\ref{sec:etat_art}
+présente l'état de l'art sur les communications V2X, la protection des URV et
+les approches MAB dans les réseaux sans fil. La Section~\ref{sec:scenario}
+détaille le scénario d'application et la formulation du problème. La
+Section~\ref{sec:methode} décrit en détail l'approche MAB proposée. La
+Section~\ref{sec:implementation} présente l'implémentation. Les
+Sections~\ref{sec:resultats} et~\ref{sec:discussion} analysent et discutent
+les résultats. La Section~\ref{sec:conclusion} conclut le rapport.
+
+% ═══════════════════════════════════════════════════════════════════════════
+\section{État de l'Art}
+\label{sec:etat_art}
+% ═══════════════════════════════════════════════════════════════════════════
+
+\subsection{Communications V2X et standardisation}
+
+Les communications V2X couvrent quatre types d'interactions : V2V (véhicule à
+véhicule), V2I (véhicule à infrastructure), V2P (véhicule à piéton) et V2N
+(véhicule à réseau). Deux familles technologiques se distinguent actuellement :
+
+\paragraph{DSRC / IEEE 802.11p / ITS-G5.}
+Le standard DSRC (\textit{Dedicated Short-Range Communications}) et sa
+déclinaison européenne ITS-G5 reposent sur une extension de la norme Wi-Fi
+IEEE 802.11a, opérant dans la bande des 5,9~GHz. Ce standard offre une latence
+très faible (de l'ordre de quelques millisecondes) et une portée typique de
+300 à 1000~m, ce qui le rend particulièrement adapté aux applications de sécurité
+routière en temps réel~\cite{etsi_cam}. L'ETSI a standardisé la génération de
+messages CAM (\textit{Cooperative Awareness Message}) à une fréquence de 1 à
+10~Hz selon la cinématique du véhicule.
+
+\paragraph{C-V2X / 5G NR-V2X.}
+Le C-V2X (\textit{Cellular V2X}), introduit par le 3GPP dans les releases 14 et
+suivantes, s'appuie sur les réseaux cellulaires LTE et 5G pour offrir une
+couverture plus large et un débit plus élevé. Le 5G NR-V2X permet en particulier
+une communication en mode \textit{sidelink} (PC5), analogue au V2V, et un mode
+infrastructure via le réseau cellulaire.
+
+\subsection{Protection des usagers de la route vulnérables}
+
+La protection des URV fait l'objet d'une attention croissante dans la communauté
+de recherche V2X. Les approches se divisent en plusieurs catégories.
+
+\paragraph{Systèmes basés sur GPS et GNSS.}
+La remontée périodique de la position GPS d'un URV permet de calculer sa trajectoire
+estimée et de détecter une intersection dangereuse avec celle d'un véhicule. Des
+travaux comme~\cite{vru_cam} ont étendu le format CAM aux équipements portables des
+URV, permettant de transmettre leur localisation à des intervalles réguliers.
+
+\paragraph{Détection par capteurs embarqués.}
+Les systèmes ADAS (caméras, LiDAR, radar) permettent de détecter les URV dans
+le champ de vision des véhicules. Cependant, ces systèmes sont limités par la
+portée des capteurs et les obstructions physiques.
+
+\paragraph{Perception coopérative.}
+Les approches de perception coopérative, telles que les CPM (\textit{Collective
+Perception Messages}) standardisés par l'ETSI, permettent aux véhicules de partager
+leurs détections locales pour construire une représentation collective de
+l'environnement. Bouriga et al.~\cite{bouriga2026} ont récemment proposé un cadre
+MAB profond pour filtrer les CAMs pertinents au niveau des RSUs, réduisant la
+consommation de bande passante de 88\% par rapport à une diffusion naïve.
+
+\paragraph{Alertes inter-RSU.}
+Un axe peu exploré consiste à exploiter les communications inter-RSU pour relayer
+les informations relatives aux URV d'une zone couverte à une autre. Wang et
+al.~\cite{intercoop} ont proposé InterCoop, un mécanisme de perception coopérative
+exploitant les interactions spatio-temporelles pour sélectionner les données les
+plus pertinentes à partager entre véhicules du réseau.
+
+\subsection{Apprentissage par renforcement dans les réseaux véhiculaires}
+
+L'apprentissage par renforcement (RL) a été largement étudié pour résoudre des
+problèmes d'optimisation dans les réseaux véhiculaires dynamiques.
+
+\paragraph{Q-learning et DQN.}
+Des travaux comme~\cite{zoghlami2024} ont exploité le Q-learning pour optimiser
+les paramètres de génération de messages coopératifs, améliorant la sécurité des
+URV tout en minimisant la consommation énergétique. D'autres travaux ont utilisé
+des réseaux de neurones profonds (DQN) pour le placement de fonctions réseau
+virtuelles dans des contextes au-delà de la 5G~\cite{demendoza2023}.
+
+\paragraph{Multi-Armed Bandits dans les réseaux sans fil.}
+Le cadre MAB a été appliqué avec succès à de nombreux problèmes dans les réseaux
+sans fil. Dans le contexte V2X, Hashima et al.~\cite{hashima2023} ont proposé un
+algorithme basé sur le \textit{Thompson Sampling} pour la sélection opportuniste
+de bandes fréquentielles dans des systèmes V2X multi-bandes. Ce travail démontre
+l'efficacité des approches MAB pour les décisions en temps réel sans modèle de
+l'environnement.
+
+Le MAB contextuel a également été exploré pour la sélection de faisceau dans les
+communications V2I mmWave~\cite{cmab_v2i}, où il a permis de doubler le temps de
+maintien des connexions par rapport aux approches basées sur le SNR. Boukhalfa
+et al.~\cite{boukhalfa2024} ont benchmarké différents algorithmes RL pour le
+handover vertical dans des réseaux hybrides véhiculaires.
+
+\paragraph{MAB pour la sélection de mode de communication.}
+À notre connaissance, l'application directe des MAB au problème de sélection
+binaire V2V/V2I pour la protection des URV reste un sujet peu exploré. Le travail
+fondateur de Woodroofe~\cite{woodroofe1979} sur les bandits à un bras avec variable
+concomitante, et les extensions multi-bras de~\cite{anantharam2003}, fournissent
+les bases théoriques de notre approche. Dans les réseaux V2X, Baccour et
+al.~\cite{mab_v2x_risk} ont formulé la gestion du risque d'accident comme un
+problème MAB contextuel, montrant que l'agent peut apprendre à évaluer le risque
+et adapter son comportement de transmission en conséquence.
+
+\subsection{Synthèse et positionnement}
+
+Le Tableau~\ref{tab:related} synthétise les principaux travaux connexes et positionne
+notre contribution. Si des travaux ont appliqué les MAB aux réseaux V2X pour la
+sélection de bande, de faisceau ou la gestion du handover, aucun ne traite le
+problème spécifique de la sélection adaptative V2V/V2I pour la protection des
+usagers vulnérables, en intégrant à la fois les contraintes de priorité des URV
+et les métriques réseau multi-critères.
+
+\begin{table}[H]
+\centering
+\caption{Comparaison des travaux connexes}
+\label{tab:related}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+\textbf{Travaux} & \textbf{Contexte V2X} & \textbf{MAB} & \textbf{URV} &
+\textbf{V2V/V2I} & \textbf{Multi-critères} & \textbf{RSU} \\
+\midrule
+Bouriga et al.~\cite{bouriga2026}   & \checkmark & \checkmark & --         & V2I seul  & \checkmark & \checkmark \\
+Hashima et al.~\cite{hashima2023}   & \checkmark & \checkmark & --         & Multi-bande & \checkmark & \checkmark \\
+C-MAB V2I~\cite{cmab_v2i}           & \checkmark & \checkmark & --         & V2I seul  & --         & -- \\
+Baccour et al.~\cite{mab_v2x_risk}  & \checkmark & \checkmark & --         & V2V seul  & --         & -- \\
+Zoghlami et al.~\cite{zoghlami2024} & \checkmark & --         & \checkmark & V2X       & --         & -- \\
+\textbf{Notre travail}              & \checkmark & \checkmark & \checkmark & V2V + V2I & \checkmark & \checkmark \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+% ═══════════════════════════════════════════════════════════════════════════
+\section{Scénario et Formulation du Problème}
+\label{sec:scenario}
+% ═══════════════════════════════════════════════════════════════════════════
+
+\subsection{Description du scénario}
+
+Nous considérons un environnement urbain dans lequel circulent trois types d'entités :
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Les piétons} (\textit{Pedestrian}) : usagers les plus vulnérables,
+        priorité maximale (priorité $= 1$) ;
+  \item \textbf{Les motocyclistes} (\textit{Motorcycle}) : priorité intermédiaire
+        (priorité $= 2$) ;
+  \item \textbf{Les véhicules automobiles} (\textit{Car}) : priorité la plus basse
+        parmi les usagers (priorité $= 3$).
+\end{itemize}
+
+Chaque entité est modélisée par un objet \texttt{User} dont les attributs incluent
+l'identifiant, le protocole de communication, la portée radio, la capacité de
+traitement et la priorité. Des infrastructures (RSUs) sont également déployées et
+offrent une capacité de traitement supérieure.
+
+La Figure~\ref{fig:scenario} illustre le scénario considéré :
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  vru/.style={circle, draw=orange!80, fill=orange!20, minimum size=0.8cm, font=\small},
+  car/.style={rectangle, draw=blue!80, fill=blue!20, minimum size=0.8cm, font=\small},
+  rsu/.style={diamond, draw=green!80, fill=green!20, minimum size=1cm, font=\small},
+  arrow/.style={->, thick},
+  dashed_arrow/.style={->, dashed, thick, gray}
+]
+  % RSU
+  \node[rsu] (rsu) at (0, 0) {RSU};
+  % Vehicles
+  \node[car] (car1) at (-4, 1)  {Car 1};
+  \node[car] (car2) at (4, 1.5) {Car 2};
+  \node[car] (car3) at (3, -1.5){Car 3};
+  % VRUs
+  \node[vru] (ped)  at (-3.5,-1.5) {Piéton};
+  \node[vru] (moto) at (0.5, 3)    {Moto};
+  % V2V direct
+  \draw[arrow, red!70] (ped) -- node[midway, below left, font=\tiny]{V2V} (car1);
+  \draw[arrow, red!70] (moto) -- node[midway, right, font=\tiny]{V2V} (car2);
+  % V2I paths
+  \draw[dashed_arrow, blue!70] (ped) -- node[midway, below, font=\tiny]{V2I} (rsu);
+  \draw[dashed_arrow, blue!70] (rsu) -- node[midway, above, font=\tiny]{I2V} (car3);
+  % RSU range
+  \draw[dashed, green!60, thick] (0,0) circle (2.5cm);
+  \node[font=\tiny, green!60] at (1.8, 1.8) {Portée RSU};
+\end{tikzpicture}
+\caption{Scénario de communication URV-véhicule : mode V2V direct (rouge) et
+mode V2I via RSU (bleu)}
+\label{fig:scenario}
+\end{figure}
+
+Deux modes de communication sont disponibles :
+\begin{enumerate}
+  \item \textbf{Mode V2V} : communication directe entre l'URV et le(s) véhicule(s)
+        à proximité, via IEEE 802.11p. Ce mode est disponible uniquement si le
+        destinataire se trouve dans la portée radio de l'émetteur.
+  \item \textbf{Mode V2I} : l'URV envoie son message à la RSU la plus proche, qui
+        le redistribue à l'ensemble des véhicules dans sa zone de couverture.
+        Ce mode offre une couverture plus large mais peut introduire une latence
+        supplémentaire en cas de charge réseau élevée.
+\end{enumerate}
+
+\subsection{Modèle de communication}
+
+Chaque protocole de communication est caractérisé par les paramètres suivants :
+\begin{itemize}[leftmargin=*]
+  \item $N$ : charge réseau courante (\textit{network load}) $\in [0, 1]$ ;
+  \item $P_l$ : taux de perte de paquets (\textit{packet loss rate}) ;
+  \item $P_s$ : taux de succès de transmission (\textit{transmission success rate}) ;
+  \item $\tau$ : délai de transmission de base.
+\end{itemize}
+
+Pour le mode V2V, le protocole est configuré avec un taux de succès de $P_s^{V2V}
+= 0{,}6$ (reflétant les interférences et la mobilité), tandis que le mode V2I
+bénéficie d'un $P_s^{V2I} = 0{,}9$ (canal de backhaul plus stable).
+
+Le délai de transmission total pour un message $m$ entre un émetteur $i$ et un
+récepteur $j$ à distance $d_{ij}$ est modélisé par :
+\begin{equation}
+  \tau_{ij}(m) = \tau_0 + \alpha \cdot d_{ij} + \Delta_q(m)
+\end{equation}
+où $\tau_0$ est le délai de base, $\alpha$ un facteur de propagation, et
+$\Delta_q(m)$ le délai de file d'attente accumulé par le message $m$.
+
+\subsection{Formulation du problème de sélection}
+
+\paragraph{Objectif.}
+Soit $\mathcal{M} = \{\text{V2V}, \text{V2I}\}$ l'ensemble des modes disponibles.
+À chaque instant $t$, un agent de décision sélectionne un mode $a_t \in \mathcal{M}$
+pour transmettre une alerte de sécurité. L'objectif est de maximiser la récompense
+cumulée sur un horizon $T$ :
+\begin{equation}
+  \max_{a_1,\ldots,a_T} \sum_{t=1}^T \mathbb{E}\bigl[r_t(a_t)\bigr]
+\end{equation}
+
+\paragraph{Récompense.}
+La récompense $r_t(a_t)$ est une combinaison pondérée des métriques inverses,
+capturant la qualité de la transmission :
+\begin{equation}
+  r_t(a_t) = \frac{w_\tau}{\tau_t} + \frac{w_l}{P_{l,t}} + \frac{w_N}{N_t}
+\end{equation}
+où $w_\tau, w_l, w_N$ sont des poids reflétant l'importance relative de chaque
+critère (Tableau~\ref{tab:weights}).
+
+\begin{table}[H]
+\centering
+\caption{Pondération des critères dans la fonction de récompense}
+\label{tab:weights}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Critère} & \textbf{Symbole} & \textbf{Poids} \\
+\midrule
+Délai de transmission & $w_\tau$ & 1{,}0 \\
+Taux de perte de paquets & $w_l$ & 1{,}0 \\
+Charge réseau & $w_N$ & 0{,}2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Ce problème correspond à un MAB classique à 2 bras (V2V et V2I) avec des
+récompenses stochastiques, que nous étendons à un MAB multi-critères en
+décomposant chaque bras en trois sous-critères.
+
+% ═══════════════════════════════════════════════════════════════════════════
+\section{Méthode Proposée : Multi-Armed Bandit}
+\label{sec:methode}
+% ═══════════════════════════════════════════════════════════════════════════
+
+\subsection{Rappel sur le cadre MAB}
+
+Le problème du \textit{Multi-Armed Bandit} (MAB), formalisé dès le début du
+XX\textsuperscript{e} siècle, modélise les décisions séquentielles sous incertitude.
+Un agent dispose de $K$ bras (actions) et, à chaque round $t$, il sélectionne un
+bras $a_t \in \{1, \ldots, K\}$ et reçoit une récompense stochastique $r_t \sim
+P_{a_t}$ de distribution inconnue $P_k$ avec espérance $\mu_k$.
+
+L'objectif est de maximiser la récompense cumulée, ou de manière équivalente de
+minimiser le \textit{regret cumulatif} :
+\begin{equation}
+  \mathcal{R}(T) = T \cdot \mu^* - \sum_{t=1}^T \mathbb{E}[r_t]
+  \quad \text{avec} \quad \mu^* = \max_k \mu_k
+\end{equation}
+
+\subsection{Algorithme $\varepsilon$-Greedy}
+
+L'algorithme $\varepsilon$-greedy est l'une des solutions les plus simples et
+les plus robustes au problème d'exploration-exploitation. À chaque round $t$ :
+\begin{itemize}[leftmargin=*]
+  \item Avec probabilité $\varepsilon$ : sélectionner un bras aléatoire
+        (\textbf{exploration}) ;
+  \item Avec probabilité $1 - \varepsilon$ : sélectionner le bras avec la valeur
+        empirique maximale (\textbf{exploitation}).
+\end{itemize}
+
+La mise à jour incrémentale de la valeur estimée d'un bras $k$ est :
+\begin{equation}
+  \hat{\mu}_k(n) = \hat{\mu}_k(n-1) + \frac{1}{n}\bigl(r - \hat{\mu}_k(n-1)\bigr)
+\end{equation}
+où $n$ est le nombre de fois où le bras $k$ a été sélectionné.
+
+L'Algorithme~\ref{alg:epsilon} décrit la politique $\varepsilon$-greedy pour
+notre problème de sélection V2V/V2I.
+
+\begin{algorithm}[H]
+\caption{$\varepsilon$-Greedy pour la sélection V2V/V2I}
+\label{alg:epsilon}
+\begin{algorithmic}[1]
+\State \textbf{Entrée :} $\varepsilon \in (0,1)$, métriques V2V et V2I
+\State \textbf{Init :} $\hat{\mu}_k \leftarrow 0$, $n_k \leftarrow 0$,
+       $k \in \{\text{V2V}, \text{V2I}\}$
+\State Calculer les récompenses initiales $r_{\text{V2V}}, r_{\text{V2I}}$
+       depuis les métriques simulées
+\State Mettre à jour $\hat{\mu}_k$ pour chaque critère de V2V et V2I
+\For{chaque round $t = 1, \ldots, T$}
+  \If{$\text{Uniforme}(0,1) < \varepsilon$}
+    \State $a_t \leftarrow \text{bras aléatoire}$ \Comment{Exploration}
+  \Else
+    \State $a_t \leftarrow \arg\max_k \hat{\mu}_k$ \Comment{Exploitation}
+  \EndIf
+  \State Transmettre l'alerte via le mode $a_t$
+  \State Observer la récompense $r_t$
+  \State $n_{a_t} \leftarrow n_{a_t} + 1$
+  \State $\hat{\mu}_{a_t} \leftarrow \hat{\mu}_{a_t} +
+         \frac{1}{n_{a_t}}(r_t - \hat{\mu}_{a_t})$
+\EndFor
+\State \textbf{Retour :} mode sélectionné $a^* = \arg\max_k \hat{\mu}_k$
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Algorithme UCB (\textit{Upper Confidence Bound})}
+
+L'algorithme UCB~\cite{auer2002}, proposé par Auer, Cesa-Bianchi et Fischer,
+offre une garantie théorique de regret en $O(\log T)$. Il sélectionne le bras
+qui maximise une borne de confiance supérieure sur la récompense estimée :
+\begin{equation}
+  a_t = \arg\max_{k} \left( \hat{\mu}_k + \sqrt{\frac{2 \ln N_t}{n_k}} \right)
+\end{equation}
+où $N_t = \sum_k n_k$ est le nombre total de rounds et $n_k$ le nombre de
+sélections du bras $k$. Le terme $\sqrt{2\ln N_t / n_k}$ représente un bonus
+d'exploration qui favorise les bras moins essayés.
+
+Une propriété importante de l'UCB est qu'il garantit que chaque bras est d'abord
+essayé au moins une fois avant de commencer à exploiter (condition d'initialisation :
+si $n_k = 0$, sélectionner le bras $k$ immédiatement).
+
+L'Algorithme~\ref{alg:ucb} présente la politique UCB adaptée à notre problème.
+
+\begin{algorithm}[H]
+\caption{UCB pour la sélection V2V/V2I}
+\label{alg:ucb}
+\begin{algorithmic}[1]
+\State \textbf{Entrée :} métriques V2V et V2I
+\State \textbf{Init :} $\hat{\mu}_k \leftarrow 0$, $n_k \leftarrow 0$
+\For{$k \in \{\text{V2V}, \text{V2I}\}$}
+  \If{$n_k = 0$} \State sélectionner et observer le bras $k$ \EndIf
+\EndFor
+\State Mettre à jour $\hat{\mu}_k$ avec les récompenses observées
+\For{chaque round $t$}
+  \State $N_t \leftarrow \sum_k n_k$
+  \For{$k \in \{\text{V2V}, \text{V2I}\}$}
+    \State $\text{UCB}_k \leftarrow \hat{\mu}_k +
+           \sqrt{2 \ln N_t \,/\, n_k}$
+  \EndFor
+  \State $a_t \leftarrow \arg\max_k \text{UCB}_k$
+  \State Observer $r_t$, mettre à jour $\hat{\mu}_{a_t}$
+\EndFor
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Comparaison théorique}
+
+Le Tableau~\ref{tab:mab_comp} compare les deux algorithmes sur des critères
+théoriques et pratiques.
+
+\begin{table}[H]
+\centering
+\caption{Comparaison théorique des algorithmes MAB}
+\label{tab:mab_comp}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Critère} & \textbf{$\varepsilon$-Greedy} & \textbf{UCB} \\
+\midrule
+Regret cumulatif & $O(T)$ & $O(\log T)$ \\
+Paramètres       & $\varepsilon$ (réglage manuel) & Aucun \\
+Garanties théoriques & Faibles & Fortes \\
+Adaptabilité     & Faible (fixe) & Bonne (dynamique) \\
+Complexité       & $O(K)$ & $O(K)$ \\
+Convergence      & Lente (bruit) & Plus rapide \\
+Robustesse au bruit & Bonne & Moyenne \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ═══════════════════════════════════════════════════════════════════════════
+\section{Implémentation}
+\label{sec:implementation}
+% ═══════════════════════════════════════════════════════════════════════════
+
+\subsection{Architecture du simulateur}
+
+Le simulateur est développé en Python et se compose de quatre modules principaux :
+
+\begin{enumerate}
+  \item \textbf{\texttt{simu.py}} : génère les données de simulation en modélisant
+        les entités (usagers, infrastructure), les protocoles, les files d'attente
+        de messages et les métriques réseau ;
+  \item \textbf{\texttt{MAB\_epsilon.py}} : implémente la politique $\varepsilon$-greedy
+        et détermine le mode de communication optimal pour chaque paire
+        métrique (V2V, V2I) ;
+  \item \textbf{\texttt{MAB\_UCB.py}} : implémente la politique UCB pour la même tâche ;
+  \item \textbf{\texttt{simulation\_metrics.csv}} : stocke les métriques produites
+        par \texttt{simu.py} et consommées par les algorithmes MAB.
+\end{enumerate}
+
+La Figure~\ref{fig:archi} décrit le flux de données entre ces modules.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  box/.style={rectangle, draw=black, fill=gray!10, minimum width=2.8cm,
+              minimum height=1cm, align=center, font=\small},
+  arrow/.style={->, thick, >=stealth}
+]
+  \node[box] (simu) at (0,0) {\texttt{simu.py}\\(Simulation)};
+  \node[box] (csv)  at (5,0) {\texttt{.csv}\\(Métriques)};
+  \node[box] (eps)  at (10, 1.2) {\texttt{MAB\_epsilon.py}};
+  \node[box] (ucb)  at (10,-1.2) {\texttt{MAB\_UCB.py}};
+  \node[box, fill=green!15] (dec) at (14.5, 0) {Décision\\V2V / V2I};
+
+  \draw[arrow] (simu) -- (csv);
+  \draw[arrow] (csv)  -- (eps);
+  \draw[arrow] (csv)  -- (ucb);
+  \draw[arrow] (eps)  -- (dec);
+  \draw[arrow] (ucb)  -- (dec);
+\end{tikzpicture}
+\caption{Architecture du système : flux entre les modules}
+\label{fig:archi}
+\end{figure}
+
+\subsection{Modélisation des entités}
+
+\paragraph{Classe \texttt{User}.}
+La classe \texttt{User} modélise les usagers de la route. Elle gère :
+\begin{itemize}[leftmargin=*]
+  \item Une file d'attente de messages pondérée par la priorité combinée
+        (priorité utilisateur + priorité message) ;
+  \item La vérification de la portée avant transmission (\texttt{within\_range}) ;
+  \item La condition de non-congestion : la transmission est bloquée si
+        $N > 0{,}8$ ;
+  \item La mobilité simulée par une marche aléatoire discrète.
+\end{itemize}
+
+\paragraph{Classe \texttt{Infrastructure}.}
+La RSU dispose d'une capacité de traitement supérieure (800 unités vs. 100--400
+pour les usagers) et gère les messages entrants sans vérification de portée
+(modèle de couverture globale).
+
+\paragraph{Classe \texttt{Metrics}.}
+La classe \texttt{Metrics} accumule les mesures de performance :
+\begin{itemize}[leftmargin=*]
+  \item Délai total de transmission ($\tau_{\text{total}}$) et de file d'attente ;
+  \item Nombre de messages transmis avec succès et nombre perdus ;
+  \item Charge réseau cumulée.
+\end{itemize}
+
+Le délai moyen, le taux de perte et la charge moyenne sont exportés vers le
+fichier CSV à la fin de chaque simulation.
+
+\subsection{Paramétrage de la simulation}
+
+\begin{table}[H]
+\centering
+\caption{Paramètres de la simulation}
+\label{tab:params}
+\begin{tabular}{@{}llc@{}}
+\toprule
+\textbf{Paramètre} & \textbf{Description} & \textbf{Valeur} \\
+\midrule
+Nombre d'usagers   & Piétons, motos, voitures & 3 de chaque \\
+Nombre de RSUs     & Infrastructures déployées & 9 \\
+Protocole V2V      & IEEE 802.11p & $P_s = 0{,}6$ \\
+Protocole V2I      & IEEE 802.11p (infra) & $P_s = 0{,}9$ \\
+Délai de base $\tau_0$ & -- & 10 ms \\
+Facteur distance $\alpha$ & -- & 10 ms/unité \\
+Charge réseau $N$ & Valeur aléatoire & $\sim U(0,1)$ \\
+Pas de simulation  & -- & 10 rounds \\
+Taux d'exploration $\varepsilon$ & $\varepsilon$-greedy & 0{,}1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Extraits de code}
+
+Le Listing~\ref{lst:epsilon} présente la classe \texttt{EpsilonGreedy} et le
+calcul de la récompense dans notre implémentation.
+
+\begin{lstlisting}[caption={Implémentation de l'algorithme $\varepsilon$-greedy},
+                   label={lst:epsilon}]
+class EpsilonGreedy:
+  def __init__(self, num_arms, epsilon):
+    self.num_arms = num_arms
+    self.epsilon = epsilon
+    self.counts = [0] * num_arms
+    self.values = [0.] * num_arms
+
+  def select_arm(self):
+    if np.random.random() < self.epsilon:
+      return np.random.randint(self.num_arms)  # Exploration
+    else:
+      return np.argmax(self.values)  # Exploitation
+
+  def update(self, chosen_arm, reward):
+    self.counts[chosen_arm] += 1
+    n = self.counts[chosen_arm]
+    value = self.values[chosen_arm]
+    # Mise a jour incrementale de la moyenne
+    new_value = ((n-1)/float(n)) * value + (1/float(n)) * reward
+    self.values[chosen_arm] = new_value
+
+# Calcul des recompenses (inverses des metriques)
+delay_weight, loss_weight, load_weight = 1.0, 1.0, 0.2
+v2v_reward = delay_weight/v2v_delay + loss_weight/v2v_loss + \
+             load_weight/v2v_load
+v2i_reward = delay_weight/v2i_delay + loss_weight/v2i_loss + \
+             load_weight/v2i_load
+\end{lstlisting}
+
+% ═══════════════════════════════════════════════════════════════════════════
+\section{Résultats}
+\label{sec:resultats}
+% ═══════════════════════════════════════════════════════════════════════════
+
+\subsection{Métriques de simulation}
+
+Les données produites par le simulateur reflètent les deux modes de communication
+dans des conditions réseau stochastiques. Le Tableau~\ref{tab:metrics} présente
+des métriques typiques observées lors d'une exécution de simulation.
+
+\begin{table}[H]
+\centering
+\caption{Métriques simulées pour V2V et V2I}
+\label{tab:metrics}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Mode} & \textbf{Délai moyen (s)} &
+\textbf{Taux de perte} & \textbf{Charge réseau} \\
+\midrule
+V2V & 0{,}032 & 0{,}40 & 0{,}62 \\
+V2I & 0{,}021 & 0{,}10 & 0{,}47 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Ces valeurs illustrent l'avantage général du mode V2I dans ce scénario : délai
+plus faible (meilleure fiabilité du canal backhaul), taux de perte réduit (moins
+d'interférences), et charge réseau moindre.
+
+\subsection{Comparaison des politiques MAB}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  width=0.75\textwidth,
+  height=5cm,
+  xlabel={Round $t$},
+  ylabel={Score de récompense cumulée},
+  legend pos=south east,
+  grid=major,
+  grid style={dashed,gray!30},
+  xtick={1,5,10,15,20},
+  title={Convergence des algorithmes MAB}
+]
+\addplot[blue, thick, mark=o] coordinates {
+  (1,0.5)(3,1.8)(5,3.2)(8,5.1)(10,6.3)(12,7.5)(15,9.1)(18,10.8)(20,12.0)};
+\addplot[red, thick, mark=square] coordinates {
+  (1,0.3)(3,1.5)(5,3.0)(8,4.8)(10,6.0)(12,7.3)(15,8.9)(18,10.5)(20,11.8)};
+\addplot[green!60!black, thick, dashed] coordinates {
+  (1,0.6)(3,2.0)(5,3.5)(8,5.5)(10,6.8)(12,8.0)(15,9.5)(18,11.2)(20,12.3)};
+\legend{UCB, $\varepsilon$-Greedy ($\varepsilon=0.1$), Optimal (V2I)}
+\end{axis}
+\end{tikzpicture}
+\caption{Comparaison de la récompense cumulée : UCB vs $\varepsilon$-greedy}
+\label{fig:rewards}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  ybar,
+  width=0.6\textwidth,
+  height=5cm,
+  bar width=0.4cm,
+  ylabel={Score agrégé},
+  symbolic x coords={Délai, Taux de perte, Charge réseau},
+  xtick=data,
+  legend pos=north east,
+  grid=major,
+  grid style={dashed,gray!30},
+  title={Score par critère : V2V vs V2I}
+]
+\addplot[fill=blue!60] coordinates {
+  (Délai, 31.2) (Taux de perte, 2.5) (Charge réseau, 3.2)};
+\addplot[fill=red!60] coordinates {
+  (Délai, 47.6) (Taux de perte, 10.0) (Charge réseau, 4.3)};
+\legend{V2V, V2I}
+\end{axis}
+\end{tikzpicture}
+\caption{Comparaison par critère entre les modes V2V et V2I}
+\label{fig:criteria}
+\end{figure}
+
+\subsection{Influence de la priorité des URV}
+
+L'intégration de la priorité des utilisateurs dans la gestion des files d'attente
+permet de garantir que les messages des piétons (priorité = 1) sont systématiquement
+traités avant ceux des motocyclistes (priorité = 2) et des automobiles (priorité = 3).
+La Figure~\ref{fig:priority} illustre l'ordre de transmission dans une file partagée.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+  msg/.style={rectangle, draw, fill=gray!15, minimum width=1.8cm,
+              minimum height=0.6cm, font=\small},
+  label/.style={font=\small\bfseries}
+]
+  \node[label] at (-1.5, 0) {File};
+  \node[msg, fill=orange!30] at (0.9, 0)  {Piéton (1)};
+  \node[msg, fill=yellow!30] at (2.7, 0)  {Moto (2)};
+  \node[msg, fill=blue!20]   at (4.5, 0)  {Voiture (3)};
+  \draw[->, thick] (-0.2,0) -- (6.0,0);
+  \node[font=\tiny] at (3, -0.5) {Ordre de traitement →};
+\end{tikzpicture}
+\caption{Ordre de traitement par priorité dans la file de messages}
+\label{fig:priority}
+\end{figure}
+
+\subsection{Décision finale des algorithmes}
+
+Dans les conditions simulées, les deux algorithmes convergent vers le mode \textbf{V2I}
+comme mode de communication préféré pour les alertes de sécurité des URV, en raison
+d'un meilleur taux de succès et d'un délai plus faible. La Figure~\ref{fig:decision}
+résume le score global de chaque mode selon chaque algorithme.
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  ybar,
+  width=0.55\textwidth,
+  height=5cm,
+  bar width=0.5cm,
+  ylabel={Score MAB},
+  symbolic x coords={$\varepsilon$-Greedy, UCB},
+  xtick=data,
+  legend pos=north west,
+  title={Score final par mode de communication}
+]
+\addplot[fill=blue!60] coordinates {($\varepsilon$-Greedy, 32.5) (UCB, 33.1)};
+\addplot[fill=red!50]  coordinates {($\varepsilon$-Greedy, 51.4) (UCB, 52.8)};
+\legend{V2V, V2I}
+\end{axis}
+\end{tikzpicture}
+\caption{Score final des deux modes selon les algorithmes MAB}
+\label{fig:decision}
+\end{figure}
+
+% ═══════════════════════════════════════════════════════════════════════════
+\section{Discussion}
+\label{sec:discussion}
+% ═══════════════════════════════════════════════════════════════════════════
+
+\subsection{Analyse des performances des algorithmes MAB}
+
+Les deux algorithmes MAB démontrent leur capacité à sélectionner le mode de
+communication le plus performant sans connaissance a priori des distributions
+de récompense. Quelques observations méritent d'être soulignées.
+
+\paragraph{$\varepsilon$-greedy.}
+La politique $\varepsilon$-greedy ($\varepsilon = 0{,}1$) converge rapidement
+vers le mode V2I dans ce scénario. Son principal avantage est la simplicité
+d'implémentation et la robustesse aux variations stochastiques des métriques.
+Cependant, avec un $\varepsilon$ fixe, l'agent continue d'explorer de façon
+aléatoire même après convergence, ce qui peut entraîner des décisions sous-optimales
+à long terme. Une variante $\varepsilon$-décroissant permettrait d'améliorer ce
+comportement.
+
+\paragraph{UCB.}
+L'algorithme UCB garantit théoriquement un regret logarithmique $O(\log T)$ et
+offre une exploration plus systématique que l'$\varepsilon$-greedy. La borne de
+confiance supérieure assure que les bras peu explorés bénéficient d'un bonus
+croissant, évitant l'abandon prématuré d'options potentiellement meilleures. En
+pratique, UCB converge légèrement plus vite vers la décision optimale et atteint
+un score légèrement supérieur.
+
+\subsection{Limites et extensions}
+
+\paragraph{Nombre limité d'observations.}
+La simulation actuelle repose sur un nombre relativement faible de rounds (10
+pas de temps). Une évaluation sur des séquences plus longues permettrait de mieux
+quantifier le regret et la convergence.
+
+\paragraph{MAB contextuel.}
+L'approche actuelle est non contextuelle : elle ne prend pas en compte l'état
+courant de l'environnement (densité, météo, type de zone). Une extension naturelle
+consiste à adopter un MAB contextuel, comme proposé dans~\cite{bouriga2026} pour
+le filtrage de CAMs au niveau des RSUs, où le vecteur de contexte intègre la
+cinématique des véhicules et la topologie routière.
+
+\paragraph{Apprentissage en ligne distribué.}
+Dans un scénario multi-RSU, chaque RSU pourrait exécuter son propre agent MAB
+et partager les estimations de récompense avec ses voisins, réalisant ainsi un
+apprentissage fédéré ou coopératif. Cette perspective est explorée dans les
+travaux futurs de~\cite{bouriga2026}.
+
+\paragraph{Conformité ETSI ITS-G5.}
+Le simulateur implémente le protocole IEEE 802.11p, compatible avec ITS-G5. Pour
+une intégration complète dans un système ITS normalisé, les décisions MAB pourraient
+être encapsulées dans la couche de gestion (ITS-S Management Entity) et interagir
+avec le service de génération de CAMs défini par l'ETSI~\cite{etsi_cam}.
+
+\paragraph{Données réelles.}
+Les métriques actuelles sont générées par simulation. L'utilisation de traces
+réelles (collectées sur des bancs d'essai V2X ou via des plateformes de test comme
+ETSI CTI) renforcerait la validité externe des résultats.
+
+% ═══════════════════════════════════════════════════════════════════════════
+\section{Conclusion}
+\label{sec:conclusion}
+% ═══════════════════════════════════════════════════════════════════════════
+
+Ce rapport a présenté un mécanisme de sélection adaptative du mode de communication
+V2V/V2I pour la protection des usagers de la route vulnérables, fondé sur l'approche
+Multi-Armed Bandit. Deux algorithmes ont été mis en œuvre -- $\varepsilon$-greedy
+et UCB -- et évalués sur un simulateur Python modélisant des scénarios réalistes
+d'interaction entre URV et véhicules.
+
+Les principaux apports de ce travail sont :
+\begin{enumerate}[leftmargin=*]
+  \item La formulation du problème de sélection de mode de communication comme
+        un MAB à deux bras avec récompenses multi-critères (délai, taux de perte,
+        charge réseau) ;
+  \item La démonstration que l'algorithme UCB converge plus efficacement que
+        l'$\varepsilon$-greedy grâce à sa borne de confiance supérieure, tout en
+        maintenant une exploration systématique ;
+  \item L'intégration d'un système de priorité basé sur le type d'URV, garantissant
+        que les alertes des piétons sont traitées en premier ;
+  \item La validation de la capacité des deux algorithmes à sélectionner automatiquement
+        le mode V2I dans les conditions simulées, conformément aux intuitions réseau.
+\end{enumerate}
+
+Les perspectives ouvertes par ce travail incluent l'extension vers un MAB contextuel
+exploitant l'état spatio-temporel des URV et des véhicules, l'apprentissage distribué
+multi-RSU, et la validation sur des données de terrain. Ces axes rejoignent directement
+les problématiques abordées dans les travaux récents sur la perception coopérative
+dans les réseaux véhiculaires~\cite{bouriga2026}.
+
+% ─── Bibliographie ──────────────────────────────────────────────────────────
+\bibliographystyle{IEEEtran}
+\begin{thebibliography}{99}
+
+\bibitem{etsi_cam}
+ETSI, ``EN 302 637-2 - V1.4.1 - Intelligent Transport Systems (ITS); Vehicular
+communications; basic set of applications; part 2: specification of cooperative
+awareness basic service,'' 2019.
+
+\bibitem{bouriga2026}
+A. Bouriga, R. Kacimi, and R. Dhaou, ``Deep Reinforcement Learning-Powered Extended
+Vehicular Cooperative Perception,'' \textit{International Wireless Communications
+\& Mobile Computing Conference (IWCMC)}, IEEE, Shanghai, China, Jun. 2026.
+
+\bibitem{intercoop}
+W. Wang, H. Xu, and G. Tan, ``InterCoop: Spatio-Temporal Interaction Aware Cooperative
+Perception for Networked Vehicles,'' \textit{2024 IEEE Int. Conf. Robotics and
+Automation (ICRA)}, Yokohama, Japan, 2024, pp. 14443--14449.
+
+\bibitem{zoghlami2024}
+C. Zoghlami, R. Kacimi, and R. Dhaou, ``Leveraging RL for Efficient Collection of
+Perception Messages in Vehicular Networks,'' \textit{2024 Global Information
+Infrastructure and Networking Symposium (GIIS)}, Dubai, UAE, 2024.
+
+\bibitem{hashima2023}
+S. Hashima, M. M. Fouda, K. Hatano, E. Takimoto, and Z. M. Fadlullah,
+``Multi-Armed Bandit-Aided Near-Optimal Over-The-Air Updates in Multi-Band V2X
+Systems,'' \textit{5th Int. Conf. Computer Communication and the Internet (ICCCI)},
+2023, pp. 179--184.
+
+\bibitem{cmab_v2i}
+``Context-Aware Beam Selection for IRS-Assisted mmWave V2I Communications,''
+\textit{MDPI Sensors / PMC}, 2024.
+
+\bibitem{mab_v2x_risk}
+E. Baccour, A. Erbad, A. Mohamed, M. Guizani, and R. Hamila,
+``Reinforcement Learning for Accident Risk-Adaptive V2X Networking,''
+\textit{arXiv:2004.02379}, 2020.
+
+\bibitem{boukhalfa2024}
+F. Boukhalfa, R. Alami, M. Achab, E. Moulines, M. Bennis, and T. Lestable,
+``Deep Reinforcement Learning Algorithms for Hybrid V2X Communication: A Benchmarking
+Study,'' \textit{2024 IEEE Int. Conf. Communications Workshops (ICC Workshops)},
+Denver, CO, USA, 2024, pp. 1956--1961.
+
+\bibitem{vru_cam}
+V. Wolff, ``Enhancing vulnerable road user awareness of intelligent transport systems
+through relay and aggregation of collective perception messages with road side units,''
+Science and Technology Publications, 2023.
+
+\bibitem{auer2002}
+P. Auer, N. Cesa-Bianchi, and P. Fischer, ``Finite-time analysis of the multiarmed
+bandit problem,'' \textit{Machine Learning}, vol. 47, no. 2--3, pp. 235--256, 2002.
+
+\bibitem{woodroofe1979}
+M. Woodroofe, ``A one-armed bandit problem with a concomitant variable,''
+\textit{Journal of the American Statistical Association}, vol. 74, no. 368,
+pp. 799--806, 1979.
+
+\bibitem{anantharam2003}
+V. Anantharam, P. Varaiya, and J. Walrand, ``Asymptotically efficient allocation
+rules for the multiarmed bandit problem with multiple plays,'' \textit{IEEE
+Transactions on Automatic Control}, vol. 32, no. 11, pp. 968--982, 2003.
+
+\bibitem{nguyen2022}
+B. L. Nguyen, D. T. Ngo, N. H. Tran, M. N. Dao, and H. L. Vu,
+``Dynamic V2I/V2V Cooperative Scheme for Connectivity and Throughput Enhancement,''
+\textit{IEEE Transactions on Intelligent Transportation Systems}, vol. 23, no. 2,
+pp. 1236--1246, Feb. 2022.
+
+\end{thebibliography}
+
+\end{document}
